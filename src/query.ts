@@ -19,9 +19,9 @@ async function main() {
     process.exit(1);
   }
 
-  // 1. Retrieve: top 6 chunks most similar to the question
+  // 1. Retrieve: top 3 chunks most similar to the question
   const vectorStore = await getVectorStore();
-  const chunks = await vectorStore.similaritySearch(question, 6);
+  const chunks = await vectorStore.similaritySearch(question, 3);
   await vectorStore.end();
   const context = chunks.map((c) => c.pageContent).join("\n\n---\n\n");
 

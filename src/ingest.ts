@@ -24,7 +24,16 @@ async function main() {
   console.log(`Loaded ${docs.length} page(s) from ${path}`);
 
   // 2. Chunk
-  const splitter = new RecursiveCharacterTextSplitter({ chunkSize: 1000, chunkOverlap: 200 });
+  for (const doc of docs) {
+    doc.pageContent = doc.pageContent.replace(/\s*\n\s*/g, " ");
+  }
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+    separators: [". ", "? ", "! ", "; ", " ", ""], 
+    keepSeparator: false,
+  });
+
   const chunks = await splitter.splitDocuments(docs);
   console.log(`Split into ${chunks.length} chunks`);
 
