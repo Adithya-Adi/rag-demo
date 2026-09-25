@@ -1,5 +1,9 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { RunnableLambda, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+import { awaitAllCallbacks } from "@langchain/core/callbacks/promises";
+import type { Document } from "@langchain/core/documents";
 import { getVectorStore } from "./store.js";
 
 const prompt = ChatPromptTemplate.fromTemplate(
@@ -19,24 +23,33 @@ async function main() {
     process.exit(1);
   }
 
-  // 1. Retrieve: top 3 chunks most similar to the question
   const vectorStore = await getVectorStore();
-  const chunks = await vectorStore.similaritySearch(question, 3);
-  await vectorStore.end();
-  const context = chunks.map((c) => c.pageContent).join("\n\n---\n\n");
+
+  // 1. Retrieve: top 3 chunks most similar to the question
+  const retrieve = vectorStore.asRetriever({ k: 3 }).withConfig({ runName: "Retrieve" });
+  const joinChunks = RunnableLambda.from((chunks: Document[]) =>
+    chunks.map((c) => c.pageContent).join("\n\n---\n\n")
+  );
 
   // 2. Augment: fill the prompt with context + question
-  const messages = await prompt.formatMessages({ context, question });
+  const augment = prompt.withConfig({ runName: "Augment" });
 
   // 3. Generate: send to the LLM
-  const llm = new ChatOpenAI({ model: "gpt-4o-mini", temperature: 0 });
-  const answer = await llm.invoke(messages);
+  const generate = new ChatOpenAI({ model: "gpt-4o-mini", temperature: 0 }).withConfig({ runName: "Generate" });
 
-  console.log("\nAnswer:\n", answer.content);
-  console.log("\nSources:");
-  for (const c of chunks) {
-    console.log(" -", c.metadata.source, "page", c.metadata.loc?.pageNumber ?? "-");
-  }
+  // One chain = one trace in LangSmith, with each step nested inside it
+  const rag = RunnableSequence.from([
+    { context: retrieve.pipe(joinChunks), question: new RunnablePassthrough() },
+    augment,
+    generate,
+    new StringOutputParser(),
+  ]).withConfig({ runName: "RAG" });
+
+  const answer = await rag.invoke(question);
+  console.log("\nAnswer:\n", answer);
+
+  await vectorStore.end();
+  await awaitAllCallbacks(); // make sure the trace is sent to LangSmith before the script exits
 }
 
 main();
